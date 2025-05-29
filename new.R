@@ -1,6 +1,11 @@
 library(rugarch)
+library(forecast)
+library(quantmod)
+library(xts)
+library(timeDate)
+library(plotly)
 
-data <- get_clean_financial_data("^GSPC", from = "2010-01-01")
+data <- get_clean_financial_data("^GSPC", from = "2019-01-01")
 
 basic_stats <- get_basic_stats(data)
 
@@ -37,8 +42,107 @@ checkresiduals(fit2)
 logLik(fit2)
 BIC(fit2)
 
-forecast_arima <- forecast(fit2, h = 10)
+forecast_arima <- forecast(fit2, h = 30)
+summary(forecast_arima)
+plot(forecast_arima)
+
+
 autoplot(forecast_arima)
+
+last_price <- as.numeric(last(Cl(data$data)))
+
+cum_return <- cumsum(forecast_arima$mean)
+
+price_forecast <- last_price * exp(cum_return)
+
+plot(price_forecast, type = "l", col = "darkgreen", lwd = 2,
+     main = "Előrejelzett árfolyam (ARIMA alapján)",
+     xlab = "Nap", ylab = "Ár")
+
+future_dates <- timeSequence(from = index(Cl(data$data))[nrow(Cl(data$data))] + 1,
+                             length.out = length(price_forecast),
+                             by = "day")
+future_dates <- as.Date(future_dates[isBizday(future_dates)])
+
+price_future <- xts(price_forecast[1:length(future_dates)], order.by = future_dates)
+
+price_hist <- Cl(data$data)
+price_combined <- rbind(price_hist, price_future)
+
+# Kezdő dátum az idősorhoz
+start_date <- as.Date("2019-01-01")
+
+# Átalakítás data.frame-é (feltételezve napi adatok)
+observed_data <- data.frame(
+  Date = seq.Date(from = start_date, by = "day", length.out = length(data$log_return)),
+  Close = as.numeric(data$log_return)
+)
+
+# Alapár (utolsó megfigyelt záróár)
+last_price <- as.numeric(tail(observed_data$Close, 1))
+
+# Várható kumulált loghozam előrejelzés
+cum_mean <- cumsum(forecast_arima$mean)
+cum_lower80 <- cumsum(forecast_arima$lower[,1])
+cum_upper80 <- cumsum(forecast_arima$upper[,1])
+cum_lower95 <- cumsum(forecast_arima$lower[,2])
+cum_upper95 <- cumsum(forecast_arima$upper[,2])
+
+# Árfolyam előrejelzés visszaskálázása
+forecast_price <- last_price * exp(cum_mean)
+lower80_price <- last_price * exp(cum_lower80)
+upper80_price <- last_price * exp(cum_upper80)
+lower95_price <- last_price * exp(cum_lower95)
+upper95_price <- last_price * exp(cum_upper95)
+
+forecast_data <- data.frame(
+  Date = forecast_dates,
+  Forecast = forecast_price,
+  Lower80 = lower80_price,
+  Upper80 = upper80_price,
+  Lower95 = lower95_price,
+  Upper95 = upper95_price
+)
+
+
+plot_ly() %>%
+  
+  # Megfigyelt adatok vonal
+  add_lines(data = observed_data, x = ~Date, y = ~Close, 
+            name = "Megfigyelt", 
+            line = list(color = 'darkblue')) %>%
+  
+  # Előrejelzés vonal
+  add_lines(data = forecast_data, x = ~Date, y = ~Forecast, 
+            name = "Előrejelzés", 
+            line = list(color = 'red', dash = 'dash')) %>%
+  
+  # 80%-os előrejelzési intervallum (szalag)
+  add_ribbons(data = forecast_data,
+              x = ~Date,
+              ymin = ~Lower80,
+              ymax = ~Upper80,
+              name = "80%-os intervallum",
+              fillcolor = 'rgba(255, 0, 0, 0.2)',
+              line = list(color = 'transparent')) %>%
+  
+  # 95%-os előrejelzési intervallum (szalag)
+  add_ribbons(data = forecast_data,
+              x = ~Date,
+              ymin = ~Lower95,
+              ymax = ~Upper95,
+              name = "95%-os intervallum",
+              fillcolor = 'rgba(255, 0, 0, 0.1)',
+              line = list(color = 'transparent')) %>%
+  
+  # Layout beállítás
+  layout(title = list(text = "S&P 500 záróárak előrejelzése (30 nap)", x = 0.5),
+         xaxis = list(title = "Dátum"),
+         yaxis = list(title = "Záróár (USD)"),
+         hovermode = "x unified")
+
+# ------------------------------------------------
+
 
 cat("AIC	-23945.77	✅ alacsony → jó illeszkedés \n")
 cat("Log-likelihood	11978.88	magasabb LL = jobb illesztés\n")
@@ -49,6 +153,7 @@ cat("p-value	5.338e-13	❌ szignifikáns → reziduum nem fehér zaj\n")
 fit3 <- Arima(diff_log_returns, order = c(4, 0, 2))
 AIC(fit3)
 checkresiduals(fit3)
+# ------------------------------------------------
 
 
 
