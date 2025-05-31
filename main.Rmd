@@ -1,0 +1,209 @@
+---
+title: "main"
+output: html_document
+---
+
+# Könytárak telepítése
+
+```{R Library install, include=FALSE}
+library(quantmod)
+library(dplyr)
+library(tidyverse)
+library(lubridate)
+library(plotly)
+library(astsa)
+library(tseries)
+library(forecast)
+library(rugarch)
+library(moments)
+library(xts)
+library(timeDate)
+library(urca)
+library(zoo)
+```
+
+# Függvények
+
+## Adat lekérés tisztitása
+
+```{R Get Data, include=FALSE}
+get_clean_financial_data <- function(symbol = "^GSPC",
+                                     from = "2010-01-01",
+                                     to = Sys.Date(),
+                                     periodicity = "daily") {
+  
+  # Adatok lekérése Yahoo Finance-ből
+  getSymbols(symbol, src = "yahoo", from = from, to = to,
+             periodicity = periodicity, auto.assign = FALSE) -> raw_data
+  
+  # NA értékek eltávolítása
+  raw_data <- na.omit(raw_data)
+  
+  # Záróár kinyerése (Close oszlop)
+  close_prices <- Cl(raw_data)
+  
+  # Loghozam számítása
+  log_returns <- log(close_prices) %>% na.omit()
+  
+  # Visszatérés listaként
+  return(list(
+    data= raw_data,
+    price = close_prices,
+    log_return = log_returns
+  ))
+}
+```
+
+## Diff
+
+```{R}
+
+make_diff_series <- function(series){
+  diff_series <- diff(series) %>% na.omit()
+  return(diff_series)
+}
+```
+
+## Alap statisztika
+
+```{R Basic Statistics, include=FALSE}
+get_basic_stats <- function(data){
+  mean_ret <- mean(data$log_return)
+  sd_ret <- sd(data$log_return)
+  skew_ret <- skewness(data$log_return)
+  kurt_ret <- kurtosis(data$log_return)
+  
+  cat("Átlagos napi loghozam: ", round(mean_ret, 6), "\n")
+  cat("Szórás: ", round(sd_ret, 6), "\n")
+  cat("Ferdeség (skewness): ", round(skew_ret, 3), "\n")
+  cat("Csúcsosság (kurtosis): ", round(kurt_ret, 3), "\n")
+  
+  return(list(mean_ret, sd_ret, skew_ret, kurt_ret))
+}
+```
+
+## Stacionaritás vizsgálat
+
+```{R Stationaroty Check, include=FALSE}
+check_stationarity <- function(series) {
+  if (!("xts" %in% class(series))) {
+    stop("A bemenetnek xts objektumnak kell lennie.")
+  }
+  
+  cat("Stacionaritás vizsgálat loghozamra:\n")
+  
+  adf_result <- adf.test(series)
+  cat("\n--- Augmented Dickey-Fuller teszt ---\n")
+  print(adf_result)
+  if (adf_result$p.value < 0.05) {
+    cat("✅ ADF szerint a sor stacionárius.\n")
+  } else {
+    cat("❌ ADF szerint a sor nem stacionárius.\n")
+  }
+  
+  kpss_result <- ur.kpss(series)
+  cat("\n--- KPSS teszt ---\n")
+  print(summary(kpss_result))
+  if (kpss_result@teststat > kpss_result@cval[1]) {
+    cat("❌ KPSS szerint a sor nem stacionárius.\n")
+  } else {
+    cat("✅ KPSS szerint a sor stacionárius.\n")
+  }
+  
+  cat("\nℹ️ Javaslat: Ha az egyik teszt szerint nem stacionárius, differenciálni érdemes.\n")
+}
+```
+
+## ACF, PACF diagnosztika megjelenítése
+
+```{R Visual Stationarity, include=FALSE}
+visual_stationarity_diagnostics <- function(series, window = 100, name = "Idősor") {
+  if (!("xts" %in% class(series))) {
+    stop("A bemenetnek xts objektumnak kell lennie.")
+  }
+  
+  par(mfrow = c(1, 2), mar = c(4, 4, 3, 1))
+  
+  # 1. ACF
+  acf(series, main = paste("ACF -", name), lag.max = 30)
+  
+  # 2 PACF
+  pacf(series, main = paste("PACF -", name), lag.max = 30)
+}
+```
+
+# S&P 500 index lekérése
+
+```{R S&P 500, echo=FALSE}
+data <- get_clean_financial_data("^GSPC", from = "2019-01-01")
+
+xts_data <- data$data
+df <- data.frame(Date = index(xts_data), coredata(xts_data))
+
+plot_ly(data = df, x = ~Date, y = ~GSPC.Close, type = 'scatter', mode = 'lines') %>%
+  layout(title = "S&P 500 záróárfolyam (2019-től)",
+         xaxis = list(title = "Dátum"),
+         yaxis = list(title = "Záróár (USD)"))
+```
+
+## Alap statisztika
+
+```{R Basic S&P 500 statis, echo=FALSE}
+basic_stats <- get_basic_stats(data)
+```
+## Stacionáritás, ACF, PACF vizsgálata
+
+```{R}
+check_stationarity(data$log_return)
+visual_stationarity_diagnostics(data$log_return, window = 1000, name = "S&P 500 loghozam")
+```
+
+## Diff
+
+```{R}
+diff_log_returns <- make_diff_series(data$log_return)
+
+```
+
+## Diff Stacionáritás, ACF, PACF vizsgálata
+
+```{R}
+check_stationarity(diff_log_returns)
+visual_stationarity_diagnostics(diff_log_returns, window = 1000, name = "S&P 500 loghozam")
+```
+## Model illesztés és értelmezés
+### ARIMA modell három komponensből áll:
+p = autoregresszív (AR) rend (PACF segítségével azonosítható),
+d = differenciálás foka (ha stacionáriussá tetted: d = 0 vagy 1),
+q = mozgóátlag (MA) rend (ACF alapján dönthető el).
+
+### ACF
+Csak 1. lag szignifikáns → gyors levágás	MA(1) → ARIMA(0,d,1)
+ACF fokozatosan csökken → lassú lecsengés	AR komponens → ARIMA(p,d,0)
+PACF is levág az 1. lag után	kombinált → ARIMA(1,d,1)
+
+#### PACF
+Ha a PACF is lassan csökken (nem vág le) → nem lehet sima AR modell (AR(1) vagy AR(2)), mert ott a PACF levág.
+Ha több lag átlépi a konfidencia sávot, és nincs egyértelmű levágás → szükség lehet több AR komponensre (pl. AR(2), AR(3)).
+Mivel az ACF gyorsan levág (csak az 1. lag szignifikáns) → az MA komponens valószínűleg alacsony rendű (pl. MA(1)).
+
+```{R}
+fit1 <- Arima(diff_log_returns, order = c(2, 0, 1))
+fit2 <- Arima(diff_log_returns, order = c(3, 0, 1))
+```
+
+### AIC alacsonyabb → jobb illeszkedés a bonyolultsággal együtt.
+```{R}
+AIC(fit1); AIC(fit2);
+```
+
+
+```{R}
+checkresiduals(fit2)
+logLik(fit2)
+BIC(fit2)
+
+forecast_arima <- forecast(fit2, h = 30)
+summary(forecast_arima)
+plot(forecast_arima)
+```
