@@ -1,6 +1,0 @@
-Az idősor log return-val és Augmented Dickey-Fuller teszt-vel stacionaritást mutatott, de differenciáltam.
-
-Az ARIMA modell három komponensből áll:
-- AR (AutoRegresszív): múltbeli értékek (p)
-- I (Integrated): differenciálás a nem stacionaritás ellen (d)
-- MA (Moving Average): múltbeli hibák (q)

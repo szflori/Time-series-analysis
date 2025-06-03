@@ -1,9 +1,72 @@
 ---
-title: "main"
+title: "Idősor statisztikai elemzése"
 output: html_document
+encoding: UTF-8
+editor_options: 
+  markdown: 
+    wrap: 72
 ---
 
-# Könytárak telepítése
+# Bevezetés
+
+## Mi az S&P 500?
+
+Az S&P 500 egy tőzsdei index, amely az Egyesült Államok 500 legnagyobb,
+nyilvánosan forgalmazott vállalatának teljesítményét méri. Ezeket a
+vállalatokat a Standard & Poor’s nevű pénzügyi szolgáltató cég válogatja
+össze különböző szempontok alapján (pl. piaci kapitalizáció, likviditás,
+szektorális reprezentáció stb.).
+
+## Miből áll az index?
+
+-   500 komponens részvény: nem pontosan 500 cég, mert egyes cégeknek
+    több részvénysorozata is szerepelhet.
+-   Piaci kapitalizációval súlyozott: a nagyobb vállalatok (pl. Apple,
+    Microsoft) nagyobb súllyal szerepelnek benne.
+-   Sokszínű szektorális lefedettség:
+    -   technológia (Apple, NVIDIA)
+    -   egészségügy (Johnson & Johnson)
+    -   pénzügyek (JP Morgan Chase)
+    -   ipar, fogyasztási cikkek, energetika stb.
+
+## Története
+
+-   Elindítása: 1957. március 4.
+-   Előzmény: a Standard Statistics Company már 1923-ban is készített 90
+    részvényből álló indexet, de a modern, 500 tagú index 1957-től él.
+-   Történelmi jelentőség: az S&P 500 egyfajta “hőmérője” az amerikai
+    (és részben a globális) gazdaság állapotának.
+
+## Idősor jellemzői
+
+1.  Nem stacionárius az árszint
+
+-   Az árfolyam hosszú távon növekszik → trend komponens van jelen.
+-   Változó volatilitás (volatility clustering) figyelhető meg – ez
+    heteroszkedasztikus viselkedést jelez (pl. GARCH-modellek indokoltak
+    lehetnek).
+
+2.  Loghozam (log return)
+
+-   log(close)
+-   A loghozam sor gyakran közelít stacionáriushoz, és ennek a
+    sorozatnak az elemzése révén jobban vizsgálhatók:
+    -   korrelációk (ACF, PACF)
+    -   volatilitási mintázatok
+
+3.  Modellezésre alkalmas sor
+
+## Hivatkozások
+
+-   S&P Global hivatalos oldala:
+    <https://www.spglobal.com/spdji/en/indices/equity/sp-500/>
+-   Historical overview: Investopedia - S&P 500
+-   Yahoo Finance (történelmi napi adatok):
+    <https://finance.yahoo.com/quote/%5EGSPC/history/>
+
+# Projekt felépítése és előkészítése
+
+-   Könyvtárak telepítése
 
 ```{R Library install, include=FALSE}
 library(quantmod)
@@ -22,69 +85,86 @@ library(urca)
 library(zoo)
 ```
 
-# Függvények
+-   Függvények beolvasása
 
-## Adat lekérés tisztitása
+    -   Adat lekérés tisztitása
 
-```{R Get Data, include=FALSE}
-get_clean_financial_data <- function(symbol = "^GSPC",
-                                     from = "2010-01-01",
-                                     to = Sys.Date(),
-                                     periodicity = "daily") {
-  
-  # Adatok lekérése Yahoo Finance-ből
-  getSymbols(symbol, src = "yahoo", from = from, to = to,
-             periodicity = periodicity, auto.assign = FALSE) -> raw_data
-  
-  # NA értékek eltávolítása
-  raw_data <- na.omit(raw_data)
-  
-  # Záróár kinyerése (Close oszlop)
-  close_prices <- Cl(raw_data)
-  
-  # Loghozam számítása
-  log_returns <- log(close_prices) %>% na.omit()
-  
-  # Visszatérés listaként
-  return(list(
-    data= raw_data,
-    price = close_prices,
-    log_return = log_returns
-  ))
-}
+    ```{R Get Data}
+    get_clean_financial_data <- function(symbol = "^GSPC",
+                                         from = "2010-01-01",
+                                         to = Sys.Date(),
+                                         periodicity = "daily") {
+      
+      # Adatok lekérése Yahoo Finance-ből
+      getSymbols(symbol, src = "yahoo", from = from, to = to,
+                 periodicity = periodicity, auto.assign = FALSE) -> raw_data
+      
+      # NA értékek eltávolítása
+      raw_data <- na.omit(raw_data)
+      
+      # Záróár kinyerése (Close oszlop)
+      close_prices <- Cl(raw_data)
+      
+      # Loghozam számítása
+      log_returns <- log(close_prices) %>% na.omit()
+      
+      # Visszatérés listaként
+      return(list(
+        data= raw_data,
+        price = close_prices,
+        log_return = log_returns
+      ))
+    }
+    ```
+
+    -   Differenciálás
+
+    ```{R Diff}
+
+    make_diff_series <- function(series){
+      diff_series <- diff(series) %>% na.omit()
+      return(diff_series)
+    }
+    ```
+
+    -   Alap statisztika
+
+    ```{R Basic statistics}
+    get_basic_stats <- function(data){
+      # Átlagos loghozam számítása
+      mean_ret <- mean(data$log_return)
+      # Szórás (standard deviation): a loghozamok volatilitását (kockázatát) méri. Minél nagyobb, annál ingadozóbb az időszak.
+      sd_ret <- sd(data$log_return)
+      # Ferdeség (skewness): az eloszlás aszimmetriáját mutatja:
+        # Pozitív érték: hosszabb jobb oldali farok → több extrém pozitív hozam.
+        # Negatív érték: hosszabb bal oldali farok → nagyobb veszteségek gyakorisága.
+      skew_ret <- skewness(data$log_return)
+      # Csúcsosság (kurtosis): az eloszlás "csúcsosságát" vagy "leptokurtikusságát" mutatja:
+      # Értéke 3 körül → normáleloszlás
+      kurt_ret <- kurtosis(data$log_return)
+      
+      cat("Átlagos napi loghozam: ", round(mean_ret, 6), "\n")
+      cat("Szórás: ", round(sd_ret, 6), "\n")
+      cat("Ferdeség (skewness): ", round(skew_ret, 3), "\n")
+      cat("Csúcsosság (kurtosis): ", round(kurt_ret, 3), "\n")
+      
+      return(list(mean_ret, sd_ret, skew_ret, kurt_ret))
+    }
+    ```
+
+    -   Stacionaritás vizsgálat
+
+KPSS azt vizsgálja, hogy egy idősor trend-stacionárius-e, vagy
+nem-stacionárius (azaz egységgyökös). A trend-stacionárius sorban van
+determinisztikus trend (pl. lineáris növekedés), de a reziduumok
+stacionáriusak. Ezzel szemben a nem-stacionárius sorban a trend
+stochasztikus (random séta jelleg).
+
+```         
+- Ha a KPSS statisztika nagyobb, mint a kritikus érték → elutasítjuk a stacionaritás hipotézisét.
+- Ha kisebb → nem tudjuk elutasítani → a sor trend-stacionárius.
 ```
-
-## Diff
-
-```{R}
-
-make_diff_series <- function(series){
-  diff_series <- diff(series) %>% na.omit()
-  return(diff_series)
-}
-```
-
-## Alap statisztika
-
-```{R Basic Statistics, include=FALSE}
-get_basic_stats <- function(data){
-  mean_ret <- mean(data$log_return)
-  sd_ret <- sd(data$log_return)
-  skew_ret <- skewness(data$log_return)
-  kurt_ret <- kurtosis(data$log_return)
-  
-  cat("Átlagos napi loghozam: ", round(mean_ret, 6), "\n")
-  cat("Szórás: ", round(sd_ret, 6), "\n")
-  cat("Ferdeség (skewness): ", round(skew_ret, 3), "\n")
-  cat("Csúcsosság (kurtosis): ", round(kurt_ret, 3), "\n")
-  
-  return(list(mean_ret, sd_ret, skew_ret, kurt_ret))
-}
-```
-
-## Stacionaritás vizsgálat
-
-```{R Stationaroty Check, include=FALSE}
+```{R Stationaroty check}
 check_stationarity <- function(series) {
   if (!("xts" %in% class(series))) {
     stop("A bemenetnek xts objektumnak kell lennie.")
@@ -114,15 +194,23 @@ check_stationarity <- function(series) {
 }
 ```
 
-## ACF, PACF diagnosztika megjelenítése
-
-```{R Visual Stationarity, include=FALSE}
+    - ACF, PACF diagnosztika megjelenítése
+```{R Visual stationarity}
 visual_stationarity_diagnostics <- function(series, window = 100, name = "Idősor") {
   if (!("xts" %in% class(series))) {
     stop("A bemenetnek xts objektumnak kell lennie.")
   }
+  # Alapbeállítások visszaállítása a végén
+  old_par <- par(no.readonly = TRUE)
+  on.exit(par(old_par))
   
-  par(mfrow = c(1, 2), mar = c(4, 4, 3, 1))
+  # Kétsoros ábra
+  par(mfrow = c(1, 2), 
+      mar = c(4.2, 4.2, 3.5, 1),   # Margók: alul, bal, fent, jobb
+      oma = c(0, 0, 2, 0),         # Külső margók a főcímhez
+      cex.main = 1.1,              # Főcím méret
+      cex.lab = 1,                 # Tengelyfelirat méret
+      cex.axis = 0.9)              # Tengelyskála méret
   
   # 1. ACF
   acf(series, main = paste("ACF -", name), lag.max = 30)
@@ -135,13 +223,13 @@ visual_stationarity_diagnostics <- function(series, window = 100, name = "Időso
 # S&P 500 index lekérése
 
 ```{R S&P 500, echo=FALSE}
-data <- get_clean_financial_data("^GSPC", from = "2019-01-01")
+data <- get_clean_financial_data("^GSPC", from = "2019-01-01", to = "2025-01-01")
 
 xts_data <- data$data
 df <- data.frame(Date = index(xts_data), coredata(xts_data))
 
 plot_ly(data = df, x = ~Date, y = ~GSPC.Close, type = 'scatter', mode = 'lines') %>%
-  layout(title = "S&P 500 záróárfolyam (2019-től)",
+  layout(title = "S&P 500 záróárfolyam (2019-től - 2025-01-01-ig)",
          xaxis = list(title = "Dátum"),
          yaxis = list(title = "Záróár (USD)"))
 ```
@@ -151,59 +239,471 @@ plot_ly(data = df, x = ~Date, y = ~GSPC.Close, type = 'scatter', mode = 'lines')
 ```{R Basic S&P 500 statis, echo=FALSE}
 basic_stats <- get_basic_stats(data)
 ```
+
 ## Stacionáritás, ACF, PACF vizsgálata
 
-```{R}
+```{R S&P 500 stationary check , echo=FALSE}
 check_stationarity(data$log_return)
 visual_stationarity_diagnostics(data$log_return, window = 1000, name = "S&P 500 loghozam")
 ```
 
-## Diff
+## S&P 500 Differenciálás
 
-```{R}
+```{R S&P 500 diff}
 diff_log_returns <- make_diff_series(data$log_return)
-
 ```
 
-## Diff Stacionáritás, ACF, PACF vizsgálata
+## S&P 500 Differenciált Stacionáritás, ACF, PACF vizsgálata
 
-```{R}
+```{R S&P 500 diff stationarity check, echo=FALSE}
 check_stationarity(diff_log_returns)
 visual_stationarity_diagnostics(diff_log_returns, window = 1000, name = "S&P 500 loghozam")
 ```
-## Model illesztés és értelmezés
-### ARIMA modell három komponensből áll:
-p = autoregresszív (AR) rend (PACF segítségével azonosítható),
-d = differenciálás foka (ha stacionáriussá tetted: d = 0 vagy 1),
-q = mozgóátlag (MA) rend (ACF alapján dönthető el).
 
-### ACF
-Csak 1. lag szignifikáns → gyors levágás	MA(1) → ARIMA(0,d,1)
-ACF fokozatosan csökken → lassú lecsengés	AR komponens → ARIMA(p,d,0)
-PACF is levág az 1. lag után	kombinált → ARIMA(1,d,1)
+## Modellezési segédlet: ARIMA modellek, ACF és PACF
 
-#### PACF
-Ha a PACF is lassan csökken (nem vág le) → nem lehet sima AR modell (AR(1) vagy AR(2)), mert ott a PACF levág.
-Ha több lag átlépi a konfidencia sávot, és nincs egyértelmű levágás → szükség lehet több AR komponensre (pl. AR(2), AR(3)).
-Mivel az ACF gyorsan levág (csak az 1. lag szignifikáns) → az MA komponens valószínűleg alacsony rendű (pl. MA(1)).
+### ARIMA modell komponensei
 
-```{R}
+Az ARIMA modell három komponensből áll:
+- AR (p): autoregresszív tag — a sor saját elmúlt értékein alapul
+- I (d): integrált tag — hányadik differenciálás szükséges a stacionaritáshoz
+- MA (q): mozgóátlag tag — hibatagok elmúlt értékein alapul
+
+### ACF (Autokorrelációs függvény)
+
+Az ACF megmutatja, hogy az idősor aktuális értéke milyen mértékben korrelál a korábbi értékekkel (lag-ekkel).
+
+- Ha csak az 1. lag szignifikáns, utána gyors levágás: valószínű MA(1) komponens → ARIMA(0,d,1)
+- Ha lassú lecsengés: valószínű AR komponens → ARIMA(p,d,0)
+- Ha sem ACF, sem PACF nem vág le gyorsan: kombinált ARMA modell valószínű → ARIMA(p,d,q)
+
+### PACF (Parciális autokorreláció)
+
+A PACF azt méri, hogy egy adott lag mekkora hatással van a jelenre, ha a köztes lag-ek hatását kiszűrjük.
+
+- Ha a PACF levág az 1. lag után (csak az 1. lag szignifikáns): valószínű AR(1) modell
+- Ha PACF lassan csökken: nem elég egy alacsony rendű AR komponens (lehet AR(2), AR(3))
+- Ha több PACF lag szignifikáns, de ACF gyorsan levág: ARIMA(p,d,1) típusú modell valószínű
+
+## Modellillesztés
+
+```{R First models}
 fit1 <- Arima(diff_log_returns, order = c(2, 0, 1))
 fit2 <- Arima(diff_log_returns, order = c(3, 0, 1))
+
+summary(fit1)
+summary(fit2)
+
 ```
 
 ### AIC alacsonyabb → jobb illeszkedés a bonyolultsággal együtt.
-```{R}
-AIC(fit1); AIC(fit2);
+
+```{R echo=FALSE}
+cat('fit1 = ', AIC(fit1), '\n')
+cat('fit2 = ',  AIC(fit2), '\n')
 ```
 
+### Residual diagnosztika: checkresiduals()
+
+1. Felső grafikon: reziduum idősora
+- A reziduumok nem fehér zajként viselkednek,
+- Lokális volatilitásugrások és tüske szerű kilengések figyelhetők meg
+- → Volatilitási klaszterezés, ami GARCH-típusú modell használatát indokolhatja
+
+2. Bal alsó grafikon: ACF a reziduumokon
+- Több lag szignifikáns (pl. 2. és 10.)
+- → az ARIMA modell nem eliminálta teljesen az autokorrelációt
+
+3. Jobb alsó grafikon: hisztogram
+- A reziduumok eloszlása nem normális
+- Leptokurtikus, csúcspontja magasabb
+- → t-eloszlás jobban illene, vagy robusztusabb modell
+
+4. Ljung–Box teszt
+- A p-érték nagyon kicsi
+- → elutasítjuk a fehér zaj nullhipotézist
+- → az ARIMA(3,0,1) modell nem megfelelő, mivel maradt strukturális információ a hibákban
+
+```{R echo=FALSE}
+checkresiduals(fit1)
+logLik(fit1)
+BIC(fit1)
+```
+
+## Modell finomhangolása
 
 ```{R}
-checkresiduals(fit2)
-logLik(fit2)
-BIC(fit2)
-
-forecast_arima <- forecast(fit2, h = 30)
-summary(forecast_arima)
-plot(forecast_arima)
+fit3 <- Arima(diff_log_returns, order = c(2, 0, 2))
+fit4 <- Arima(diff_log_returns, order = c(3, 0, 2))
+fit5 <- Arima(diff_log_returns, order = c(4, 0, 2))
 ```
+
+| Modell       | AIC            | BIC            | σ²              | LLF           | RMSE          | MAE           | ACF1           |
+| ------------ | -------------- | -------------- | --------------- | ------------- | ------------- | ------------- | -------------- |
+| ARIMA(2,0,2) | **-9553.86** ✅ | **-9521.55** ✅ | **0.0001555** ✅ | 4782.93       | **0.01245** ✅ | **0.00843** ✅ | 0.01819        |
+| ARIMA(3,0,2) | -9482.92       | -9445.22       | 0.0001624       | 4748.46       | 0.01272       | 0.00846       | 0.00203        |
+| ARIMA(4,0,2) | -9551.06       | -9507.98       | 0.0001555       | **4783.53** ✅ | 0.01244       | 0.00843       | **0.000046** ✅ |
+
+```{R echo=FALSE}
+summary(fit3)
+summary(fit4)
+summary(fit5)
+```
+
+### Értelmezés
+
+1. AIC / BIC
+- A legalacsonyabb AIC és BIC értéket az ARIMA(2,0,2) produkálta → statisztikai illeszkedés szempontjából a legjobb választás.
+- Az ARIMA(4,0,2) nagyon közel van hozzá, de több paramétert használ, tehát komplexebb modell, ami BIC-ben hátrányt jelent.
+
+2. Log-likelihood
+- Az ARIMA(4,0,2) log-likelihood értéke a legmagasabb → jobb nyers illeszkedés, de több paraméter miatt ez önmagában nem döntő.
+
+3. RMSE / MAE
+- RMSE-ben és MAE-ben ARIMA(2,0,2) és (4,0,2) szinte azonos teljesítményt mutatnak.
+- A különbség elhanyagolható, tehát nem indokolt a komplexitás növelése.
+
+4. ACF1 (reziduum autokorreláció első lagje)
+- Az ARIMA(4,0,2) ACF1 értéke a legkisebb (≈ 0) → a reziduumok leginkább fehér zaj szerűek
+- Az ARIMA(2,0,2) ACF1 ≈ 0.02 → még mindig nagyon jó, de nem tökéletes
+
+```{R echo=FALSE}
+checkresiduals(fit3)
+```
+## GARCH
+
+### Adatok előkészítése
+
+```{R}
+squared_return <- diff_log_returns^2
+```
+
+### ACF
+
+Lassú lecsengés, fokozatos csökkenés. GARCH struktúra (GARCH komponens, azaz p ≥ 1).
+
+```{R echo=FALSE}
+acf(squared_return, main = "ACF - loghozam^2")
+```
+
+### PACF
+
+GARCH(1,1) Alapmodell, ha gyorsan csökken az ACF GARCH(1,2) Ha PACF-ben
+több lag is szignifikáns GARCH(2,1) Ha ACF-ben 2–3 lag is jelentős marad
+GARCH(2,2) Ha mindkét sorozatban több szignifikáns érték látható.
+
+```{R echo=FALSE}
+pacf(squared_return, main = "PACF - loghozam^2")
+```
+
+### Model illesztés
+
+- GARCH(1,1)
+- GARCH(1,2)
+- GARCH(2,1)
+- GARCH(2,2)
+
+```{R include=FALSE}
+# GARCH(1,1)
+spec11 <- ugarchspec(
+  variance.model = list(model = "sGARCH", garchOrder = c(1,1)),
+  mean.model = list(armaOrder = c(2,2), include.mean = TRUE),
+  distribution.model = "std"
+)
+
+fit11  <- ugarchfit(spec = spec11, data = diff_log_returns)
+
+# GARCH(1,2)
+spec12 <- ugarchspec(
+  variance.model = list(model = "sGARCH", garchOrder = c(1,2)),
+  mean.model = list(armaOrder = c(2,2), include.mean = TRUE),
+  distribution.model = "std"
+)
+fit12 <- ugarchfit(spec12, data = diff_log_returns)
+
+# GARCH(2,1)
+spec21 <- ugarchspec(
+  variance.model = list(model = "sGARCH", garchOrder = c(2,1)),
+  mean.model = list(armaOrder = c(2,2), include.mean = TRUE),
+  distribution.model = "std"
+)
+fit21 <- ugarchfit(spec21, data = diff_log_returns)
+
+# GARCH(2,2)
+spec22 <- ugarchspec(
+  variance.model = list(model = "sGARCH", garchOrder = c(2,2)),
+  mean.model = list(armaOrder = c(2,2), include.mean = TRUE),
+  distribution.model = "std"
+)
+fit22 <- ugarchfit(spec22, data = diff_log_returns)
+```
+
+### Modellek összehasonlítása
+
+A legkisebb az ideális választás.
+
+```{R echo=FALSE}
+infocriteria(fit11)
+infocriteria(fit12)
+infocriteria(fit21)
+infocriteria(fit22)
+```
+
+## Előrejelzés
+
+```{R echo=FALSE}
+forecast_garch <- ugarchforecast(fit11, n.ahead = 10)
+
+# Volatilitás előrejelzés (σ)
+sigma_forecast <- sigma(forecast_garch)
+
+future_dates <- seq.Date(from = Sys.Date() + 1, by = "day", length.out = length(sigma_forecast))
+
+vol_forecast_df <- data.frame(
+  Date = future_dates,
+  Sigma = as.numeric(sigma_forecast)
+)
+
+plot_ly(vol_forecast_df, x = ~Date, y = ~Sigma, type = "scatter", mode = "lines+markers",
+        line = list(color = "firebrick"), name = "Volatilitás") %>%
+  layout(title = "GARCH(1,1) előrejelzett volatilitás (σ)",
+         xaxis = list(title = "Dátum"),
+         yaxis = list(title = "Volatilitás (σ)"),
+         hovermode = "x unified")
+
+```
+
+```{R echo=FALSE}
+returns_forecast <- fitted(forecast_garch)
+
+last_price <- as.numeric(last(data$price))
+price_forecast <- last_price * exp(cumsum(returns_forecast))
+
+price_df <- data.frame(Date = future_dates, Price = price_forecast)
+
+plot_ly(price_df, x = ~Date, y = ~Price, type = "scatter", mode = "lines+markers",
+        line = list(color = "forestgreen"), name = "Árfolyam") %>%
+  layout(title = "GARCH(1,1)-alapú árfolyam előrejelzés",
+         xaxis = list(title = "Dátum"),
+         yaxis = list(title = "Árfolyam (USD)"))
+
+```
+
+## Moving Average (Gördülő átlag)
+
+```{R echo=FALSE}
+roll_trend <- rollmean(data$price, k = 30, align = "right", fill = NA)
+
+trend_df <- data.frame(
+  Date = index(data$price),
+  Close = as.numeric(data$price),
+  Trend = as.numeric(roll_trend)
+)
+
+plot_ly(trend_df, x = ~Date) %>%
+  add_lines(y = ~Close, name = "Eredeti", line = list(color = 'gray')) %>%
+  add_lines(y = ~Trend, name = "30 napos trend", line = list(color = 'blue')) %>%
+  layout(title = "S&P 500 trendvizsgálat (30 napos rolling átlag)",
+         xaxis = list(title = "Dátum"),
+         yaxis = list(title = "Árfolyam"),
+         hovermode = "x unified")
+```
+
+## Loess görbe (simított trend)
+
+```{R echo=FALSE}
+loess_fit <- loess(Close ~ as.numeric(Date), data = trend_df, span = 0.2)
+trend_df$LoessTrend <- predict(loess_fit)
+
+plot_ly(trend_df, x = ~Date) %>%
+  add_lines(y = ~Close, name = "Eredeti", line = list(color = 'gray')) %>%
+  add_lines(y = ~LoessTrend, name = "Loess trend", line = list(color = 'darkgreen')) %>%
+  layout(title = "Loess-alapú trendvizsgálat",
+         xaxis = list(title = "Dátum"),
+         yaxis = list(title = "Árfolyam"),
+         hovermode = "x unified")
+```
+
+## STL dekompozíció trendkomponensének vizualizálása
+
+```{R echo=FALSE}
+log_close_ts <- ts(as.numeric(data$log_return), frequency = 252)
+
+decomp <- stl(log_close_ts, s.window = "periodic")
+trend_part <- decomp$time.series[, "trend"]
+
+trend_df <- data.frame(
+  Date = index(data$log_return),
+  LogClose = as.numeric(data$log_return),
+  Trend = as.numeric(trend_part)
+)
+
+plot_ly(trend_df, x = ~Date) %>%
+  add_lines(y = ~LogClose, name = "Log záróár", line = list(color = 'gray')) %>%
+  add_lines(y = ~Trend, name = "STL trend", line = list(color = 'blue')) %>%
+  layout(title = "STL dekompozíció trend komponenssel",
+         xaxis = list(title = "Dátum"),
+         yaxis = list(title = "log Ár"),
+         hovermode = "x unified")
+
+```
+
+## Szezonális
+
+```{R echo=FALSE}
+ggseasonplot(log_close_ts, year.labels = TRUE, main = "Szezonális diagram (log ár)")
+
+log_df <- data.frame(
+  Date = index(data$log_return),
+  log_close = as.numeric(data$log_return)
+)
+
+log_df$Month <- factor(month(log_df$Date, label = TRUE))
+
+plot_ly(log_df, x = ~Month, y = ~log_close, type = "box") %>%
+  layout(title = "S&P 500 log-záróár szezonális dobozdiagram",
+         yaxis = list(title = "Log ár"),
+         xaxis = list(title = "Hónap"))
+```
+
+## A FOMC meeting napjai körüli árfolyamreakció elemzése
+
+A szkript célja, hogy megvizsgálja, hogyan reagáltak az S&P 500 loghozamai a 2022–2023 közötti FOMC kamatdöntések környékén. Minden meeting köré ±10 napos ablakot rajzolunk, majd ezeket összeátlagoljuk. A diagramon látható az átlagos napi hozam a meeting előtt és után, valamint egy ±1 szórású szalag, amely a bizonytalanságot (volatilitást) jelzi.
+
+```{R echo=FALSE}
+fomc_dates <- as.Date(c("2022-01-26", "2022-03-16", "2022-05-04", "2022-06-15", "2022-07-27",
+                        "2022-09-21", "2022-11-02", "2022-12-14", "2023-02-01", "2023-03-22",
+                        "2023-05-03", "2023-06-14", "2023-07-26", "2023-09-20", "2023-11-01",
+                        "2023-12-13"))
+
+window_size <- 10
+
+results <- data.frame()
+
+for (date in fomc_dates) {
+  idx <- which(index(diff_log_returns) == date)
+  if (length(idx) == 1 && idx > window_size && idx + window_size <= length(diff_log_returns)) {
+    window <- diff_log_returns[(idx - window_size):(idx + window_size)]
+    df <- data.frame(
+      Day = -window_size:window_size,
+      Return = as.numeric(window),
+      EventDate = date
+    )
+    results <- rbind(results, df)
+  }
+}
+
+avg_effect <- results %>%
+  group_by(Day) %>%
+  summarise(mean_return = mean(Return),
+            sd_return = sd(Return))
+
+plot_ly(avg_effect, x = ~Day, y = ~mean_return, type = 'scatter', mode = 'lines+markers',
+        name = "Átlagos hozam") %>%
+  add_ribbons(ymin = ~mean_return - sd_return, ymax = ~mean_return + sd_return,
+              name = "±1 SD", fillcolor = 'rgba(0, 100, 200, 0.2)', line = list(color = 'transparent')) %>%
+  layout(title = "Átlagos hozam a FOMC meeting körül",
+         xaxis = list(title = "Nap a FOMC meeting körül"),
+         yaxis = list(title = "Átlagos loghozam"))
+
+```
+
+```{R include=FALSE}
+event_impact_test <- function(returns_xts, event_dates, window = 10, reference = NULL) {
+  # Ellenőrzés
+  if (!"xts" %in% class(returns_xts)) stop("A hozamoknak xts objektumnak kell lennie.")
+  if (!inherits(event_dates, "Date")) stop("Az eseménydátumoknak Date típusúnak kell lenniük.")
+
+  # Alapértelmezett referencia érték: teljes idősor átlaga
+  if (is.null(reference)) {
+    reference <- mean(returns_xts, na.rm = TRUE)
+  }
+
+  # Esemény utáni hozamok gyűjtése
+  post_event_returns <- do.call(c, lapply(event_dates, function(date) {
+    start_index <- which(index(returns_xts) == date)
+    if (length(start_index) == 0) return(NULL)
+    event_window <- returns_xts[(start_index + 1):(start_index + window)]
+    as.numeric(event_window)
+  }))
+  
+  # Szűrés NA-ra
+  post_event_returns <- post_event_returns[!is.na(post_event_returns)]
+  
+  # T-próba
+  t_test <- t.test(post_event_returns, mu = reference)
+
+  # Eredmény lista
+  list(
+    n_events = length(event_dates),
+    n_values = length(post_event_returns),
+    sample_mean = mean(post_event_returns),
+    reference_mean = reference,
+    t_test = t_test
+  )
+}
+
+```
+
+### Eredmények értelmezése
+
+| Kimenet neve          | Jelentése                                                                                                                                          |
+| --------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **\$n\_events**       | `16` → 16 db FOMC meeting dátum szerepel az elemzésben                                                                                             |
+| **\$n\_values**       | `160` → 16 meeting × 10 napos időablak (pl. +1 … +10 nap), összesen 160 loghozam                                                                   |
+| **\$sample\_mean**    | `0.001016841` → az eseményt követő loghozamok átlaga                                                                                               |
+| **\$reference\_mean** | `0.000564307` → a vizsgált időszakon kívüli (baseline) átlagos hozam                                                                               |
+| **\$t\_test**         | egymintás t-próba eredménye, amely azt vizsgálja, hogy **az esemény utáni hozamok átlaga szignifikánsan eltér-e a referenciaértéktől (0.0005643)** |
+
+### T-próba eredmény
+
+- t = 0.4405, df = 159 → a statisztikai próba gyenge
+- p-value = 0.6602 → nem szignifikáns (mert > 0.05)
+- 95%-os konfidenciaintervallum: [−0.00101, 0.00305] → tartalmazza a referenciaértéket
+- Következtetés: nem utasíthatjuk el a nullhipotézist, tehát a loghozam nem tér el szignifikánsan a megszokott értéktől
+
+```{R echo=FALSE}
+event_impact_test(diff_log_returns, fomc_dates, window = 10)
+```
+
+## A Non-Farm Payrolls (NFP) adatok eseményhatás-vizsgálata
+
+A Non-Farm Payrolls (NFP) az egyik legfontosabb makrogazdasági mutató az Egyesült Államokban, amely a mezőgazdaságon kívüli szektorokban létrejött új munkahelyek számát mutatja. Ezt a mutatót a U.S. Bureau of Labor Statistics (BLS) teszi közzé minden hónap első péntekén, és a munkaerőpiac állapotára, valamint a gazdaság növekedési ütemére utal.
+
+A pénzügyi piacok számára az NFP adat:
+- jelentős volatilitás-kiváltó esemény,
+- közvetlenül befolyásolhatja a kamatvárakozásokat (FED politikáján keresztül),
+- ezáltal hatást gyakorolhat a részvénypiacokra, kötvénypiacokra és devizaárfolyamokra is.
+
+```{R echo=FALSE}
+
+nfp_dates <- as.Date(c(
+  # 2019
+  "2019-01-04", "2019-02-01", "2019-03-08", "2019-04-05", "2019-05-03", "2019-06-07",
+  "2019-07-05", "2019-08-02", "2019-09-06", "2019-10-04", "2019-11-01", "2019-12-06",
+  # 2020
+  "2020-01-10", "2020-02-07", "2020-03-06", "2020-04-03", "2020-05-08", "2020-06-05",
+  "2020-07-02", "2020-08-07", "2020-09-04", "2020-10-02", "2020-11-06", "2020-12-04",
+  # 2021
+  "2021-01-08", "2021-02-05", "2021-03-05", "2021-04-02", "2021-05-07", "2021-06-04",
+  "2021-07-02", "2021-08-06", "2021-09-03", "2021-10-08", "2021-11-05", "2021-12-03",
+  # 2022
+  "2022-01-07", "2022-02-04", "2022-03-04", "2022-04-01", "2022-05-06", "2022-06-03",
+  "2022-07-08", "2022-08-05", "2022-09-02", "2022-10-07", "2022-11-04", "2022-12-02",
+  # 2023
+  "2023-01-06", "2023-02-03", "2023-03-10", "2023-04-07", "2023-05-05", "2023-06-02",
+  "2023-07-07", "2023-08-04", "2023-09-01", "2023-10-06", "2023-11-03", "2023-12-08",
+  # 2024
+  "2024-01-05", "2024-02-02", "2024-03-08", "2024-04-05", "2024-05-03", "2024-06-07",
+  "2024-07-05", "2024-08-02", "2024-09-06", "2024-10-04", "2024-11-01", "2024-12-06",
+  # 2025
+  "2025-01-10", "2025-02-07", "2025-03-07", "2025-04-04", "2025-05-02", "2025-06-06",
+  "2025-07-03", "2025-08-01", "2025-09-05", "2025-10-03", "2025-11-07", "2025-12-05"
+))
+
+event_impact_test(diff_log_returns, nfp_dates, window = 10)
+```
+
+### Összefoglalás
+
+A 2019 és 2025 között vizsgált 84 NFP publikáció alapján nem figyelhető meg szignifikáns eseményhatás az amerikai részvénypiacon. Az eseményt követő 10 napos loghozamok átlaga nem tért el szignifikánsan a piaci referenciahozamtól. Ez alapján a NFP jelentések nem jártak együtt kiemelkedő árfolyamreakcióval.
