@@ -1,9 +1,11 @@
 ---
 title: "Idősor statisztikai elemzése"
-output: html_document
-encoding: UTF-8
-editor_options: 
-  markdown: 
+output:
+  pdf_document: default
+  html_document: default
+encoding: "UTF-8"
+editor_options:
+  markdown:
     wrap: 72
 ---
 
@@ -370,6 +372,24 @@ summary(fit5)
 ```{R echo=FALSE}
 checkresiduals(fit3)
 ```
+## Empirikus volatilitás (rolling std)
+
+```{R}
+# Napi volatilitás számítása mozgó szórással (pl. 21 napos ablak)
+rolling_volatility <- rollapply(diff_log_returns, width = 21, FUN = sd, align = "right", fill = NA)
+
+rolling_vol_df <- data.frame(
+  Date = index(rolling_volatility),
+  Volatility = coredata(rolling_volatility)
+) %>% na.omit()
+
+plot_ly(rolling_vol_df, x = ~Date, y = ~GSPC.Close, type = "scatter", mode = "lines",
+        line = list(color = "darkorange"), name = "Empirikus volatilitás") %>%
+  layout(title = "S&P 500 loghozam alapú mozgó volatilitás (21 napos)",
+         xaxis = list(title = "Dátum"),
+         yaxis = list(title = "Volatilitás (σ)"))
+```
+
 ## GARCH
 
 ### Adatok előkészítése
@@ -489,65 +509,6 @@ plot_ly(price_df, x = ~Date, y = ~Price, type = "scatter", mode = "lines+markers
 
 ```
 
-## Moving Average (Gördülő átlag)
-
-```{R echo=FALSE}
-roll_trend <- rollmean(data$price, k = 30, align = "right", fill = NA)
-
-trend_df <- data.frame(
-  Date = index(data$price),
-  Close = as.numeric(data$price),
-  Trend = as.numeric(roll_trend)
-)
-
-plot_ly(trend_df, x = ~Date) %>%
-  add_lines(y = ~Close, name = "Eredeti", line = list(color = 'gray')) %>%
-  add_lines(y = ~Trend, name = "30 napos trend", line = list(color = 'blue')) %>%
-  layout(title = "S&P 500 trendvizsgálat (30 napos rolling átlag)",
-         xaxis = list(title = "Dátum"),
-         yaxis = list(title = "Árfolyam"),
-         hovermode = "x unified")
-```
-
-## Loess görbe (simított trend)
-
-```{R echo=FALSE}
-loess_fit <- loess(Close ~ as.numeric(Date), data = trend_df, span = 0.2)
-trend_df$LoessTrend <- predict(loess_fit)
-
-plot_ly(trend_df, x = ~Date) %>%
-  add_lines(y = ~Close, name = "Eredeti", line = list(color = 'gray')) %>%
-  add_lines(y = ~LoessTrend, name = "Loess trend", line = list(color = 'darkgreen')) %>%
-  layout(title = "Loess-alapú trendvizsgálat",
-         xaxis = list(title = "Dátum"),
-         yaxis = list(title = "Árfolyam"),
-         hovermode = "x unified")
-```
-
-## STL dekompozíció trendkomponensének vizualizálása
-
-```{R echo=FALSE}
-log_close_ts <- ts(as.numeric(data$log_return), frequency = 252)
-
-decomp <- stl(log_close_ts, s.window = "periodic")
-trend_part <- decomp$time.series[, "trend"]
-
-trend_df <- data.frame(
-  Date = index(data$log_return),
-  LogClose = as.numeric(data$log_return),
-  Trend = as.numeric(trend_part)
-)
-
-plot_ly(trend_df, x = ~Date) %>%
-  add_lines(y = ~LogClose, name = "Log záróár", line = list(color = 'gray')) %>%
-  add_lines(y = ~Trend, name = "STL trend", line = list(color = 'blue')) %>%
-  layout(title = "STL dekompozíció trend komponenssel",
-         xaxis = list(title = "Dátum"),
-         yaxis = list(title = "log Ár"),
-         hovermode = "x unified")
-
-```
-
 ## Szezonális
 
 ```{R echo=FALSE}
@@ -643,6 +604,38 @@ event_impact_test <- function(returns_xts, event_dates, window = 10, reference =
   )
 }
 
+event_volatility_analysis <- function(returns_xts, event_dates, window = 10) {
+  result <- data.frame()
+
+  for (event_date in event_dates) {
+    idx <- which(index(returns_xts) == event_date)
+    if (length(idx) != 1 || idx <= window || idx + window > length(returns_xts)) next
+
+    pre_event <- returns_xts[(idx - window):(idx - 1)]
+    post_event <- returns_xts[(idx + 1):(idx + window)]
+
+    spec <- ugarchspec(
+      variance.model = list(model = "sGARCH", garchOrder = c(1,1)),
+      mean.model = list(armaOrder = c(1,1), include.mean = TRUE),
+      distribution.model = "std"
+    )
+
+    fit_pre <- tryCatch(ugarchfit(spec, pre_event), error = function(e) NULL)
+    fit_post <- tryCatch(ugarchfit(spec, post_event), error = function(e) NULL)
+
+    if (!is.null(fit_pre) && !is.null(fit_post)) {
+      result <- rbind(result, data.frame(
+        EventDate = as.Date(event_date),
+        VolBefore = mean(sigma(fit_pre)),
+        VolAfter = mean(sigma(fit_post)),
+        RelChange = (mean(sigma(fit_post)) - mean(sigma(fit_pre))) / mean(sigma(fit_pre))
+      ))
+    }
+  }
+  return(result)
+}
+
+
 ```
 
 ### Eredmények értelmezése
@@ -664,6 +657,19 @@ event_impact_test <- function(returns_xts, event_dates, window = 10, reference =
 
 ```{R echo=FALSE}
 event_impact_test(diff_log_returns, fomc_dates, window = 10)
+```
+## Volatilitás-változás vizsgálata FOMC események körül
+
+A FOMC eseményeket megelőző és követő időszakok volatilitása statisztikailag nem különbözik egymástól. A változás átlaga gyakorlatilag nulla, és a szórás is túl nagy ahhoz, hogy következtetést vonjunk le. Ez alapján nem tudjuk bizonyítani, hogy a FOMC meetingek volatilitásnövekedést váltanak ki az S&P 500 hozamában.
+
+```{R warning=FALSE}
+summary_vol <- event_volatility_analysis(diff_log_returns, fomc_dates, window = 40)
+
+summary_vol_clean <- summary_vol %>% filter(!is.na(VolBefore) & !is.na(VolAfter))
+
+# Párosított t-próba a volatilitásokra
+t.test(summary_vol_clean$VolBefore, summary_vol_clean$VolAfter, paired = TRUE)
+
 ```
 
 ## A Non-Farm Payrolls (NFP) adatok eseményhatás-vizsgálata
@@ -702,6 +708,19 @@ nfp_dates <- as.Date(c(
 ))
 
 event_impact_test(diff_log_returns, nfp_dates, window = 10)
+```
+
+## Volatilitás-változás vizsgálata Non-Farm Payrolls (NFP) események körül
+
+A 2019–2025 közötti 39 NFP esemény körül végzett volatilitás-elemzés alapján nincs statisztikailag szignifikáns bizonyíték arra, hogy a volatilitás megváltozik ezeken a napokon. Bár az átlagos utólagos volatilitás enyhén alacsonyabb, ez a különbség nem elég nagy vagy konzisztens ahhoz, hogy érdemi következtetést vonjunk le.
+
+```{R warning=FALSE}
+summary_vol <- event_volatility_analysis(diff_log_returns, nfp_dates, window = 40)
+
+summary_vol_clean <- summary_vol %>% filter(!is.na(VolBefore) & !is.na(VolAfter))
+
+# Párosított t-próba a volatilitásokra
+t.test(summary_vol_clean$VolBefore, summary_vol_clean$VolAfter, paired = TRUE)
 ```
 
 ### Összefoglalás
