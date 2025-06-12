@@ -1,8 +1,8 @@
 ---
 title: "Idősor statisztikai elemzése"
 output:
-  pdf_document: default
   html_document: default
+  pdf_document: default
 encoding: "UTF-8"
 editor_options:
   markdown:
@@ -374,7 +374,14 @@ checkresiduals(fit3)
 ```
 ## Empirikus volatilitás (rolling std)
 
-```{R}
+A pénzügyi idősorok (pl. részvényhozamok) volatilitása időben nem állandó. Ennek érzékeltetésére 21 napos gördülő ablakban számítjuk ki a loghozamok szórását, amely egy empirikus becslése a napi volatilitásnak. Az így kapott sorozat jól szemlélteti a piaci turbulencia időbeli változását.
+
+Ez az ábra lehetővé teszi:
+- volatilitási klaszterek vizsgálatát (pl. válsághelyzetek körül),
+- a heteroszkedaszticitás vizuális felismerését,
+- és megalapozza a GARCH-modellek használatát, amelyek a volatilitás időbeli változását formalizálják.
+
+```{R echo=FALSE}
 # Napi volatilitás számítása mozgó szórással (pl. 21 napos ablak)
 rolling_volatility <- rollapply(diff_log_returns, width = 21, FUN = sd, align = "right", fill = NA)
 
@@ -471,7 +478,15 @@ infocriteria(fit22)
 
 ## Előrejelzés
 
+Az első ábra a GARCH(1,1) modell által előrejelzett napi szórást (volatilitást) mutatja a következő 10 napra:
+- A volatilitás fokozatosan emelkedik, amely a modell szerint növekvő piaci bizonytalanságot jelez.
+- A sztochasztikus volatilitás nem állandó: a modell az eddigi klasztereződő viselkedést extrapolálja.
+- Az előrejelzett volatilitás értéke a vizsgált időszak végére meghaladja a 0.011-es szintet, ami viszonylag nyugodt piaci környezetet jelez, de enyhe emelkedő trenddel.
+
 ```{R echo=FALSE}
+log_close_ts <- ts(as.numeric(data$log_return), frequency = 252)
+
+
 forecast_garch <- ugarchforecast(fit11, n.ahead = 10)
 
 # Volatilitás előrejelzés (σ)
@@ -492,6 +507,10 @@ plot_ly(vol_forecast_df, x = ~Date, y = ~Sigma, type = "scatter", mode = "lines+
          hovermode = "x unified")
 
 ```
+A második ábra az előrejelzett S&P 500 indexárfolyamot mutatja, a GARCH(1,1) modell által becsült hozamok kumulálásával:
+- A pálya folyamatos emelkedést mutat, ami a modellbe ágyazott pozitív átlagos loghozam következménye.
+- A volatilitás emelkedése ellenére az árfolyam-trend stabilan felfelé mutat, ami bullish piaci várakozást tükröz.
+- Az előrejelzés determinisztikusnak tűnik, de ez a GARCH modell sajátossága: csak a szórás időbeli változását modellezi, nem pedig az árfolyam véletlenszerű alakulását (nincs szimulációs elágazás).
 
 ```{R echo=FALSE}
 returns_forecast <- fitted(forecast_garch)
@@ -510,6 +529,17 @@ plot_ly(price_df, x = ~Date, y = ~Price, type = "scatter", mode = "lines+markers
 ```
 
 ## Szezonális
+
+A szezonális vizsgálat célja annak feltárása, hogy az S&P 500 log-árfolyama mutat-e ismétlődő mintázatokat évszakosan – azaz például van-e rendszeres emelkedés vagy csökkenés bizonyos hónapokban.
+
+Kétféle szezonális ábrát készítünk:
+
+- Szezonális vonaldiagram (év szerint)
+- Szezonális dobozdiagram (hónap szerint)
+
+A ggseasonplot() függvény a forecast csomag része.
+Egy idősort (itt: log-záróár) évenként színezve jelenít meg úgy, hogy az éven belüli időpontokat (pl. hónapokat) egymás mellé teszi.
+Ez lehetővé teszi, hogy vizuálisan összehasonlítsuk az egyes évek szezonális mintáit.
 
 ```{R echo=FALSE}
 ggseasonplot(log_close_ts, year.labels = TRUE, main = "Szezonális diagram (log ár)")
@@ -709,6 +739,9 @@ nfp_dates <- as.Date(c(
 
 event_impact_test(diff_log_returns, nfp_dates, window = 10)
 ```
+### Összefoglalás
+
+A 2019 és 2025 között vizsgált 84 NFP publikáció alapján nem figyelhető meg szignifikáns eseményhatás az amerikai részvénypiacon. Az eseményt követő 10 napos loghozamok átlaga nem tért el szignifikánsan a piaci referenciahozamtól. Ez alapján a NFP jelentések nem jártak együtt kiemelkedő árfolyamreakcióval.
 
 ## Volatilitás-változás vizsgálata Non-Farm Payrolls (NFP) események körül
 
@@ -722,7 +755,3 @@ summary_vol_clean <- summary_vol %>% filter(!is.na(VolBefore) & !is.na(VolAfter)
 # Párosított t-próba a volatilitásokra
 t.test(summary_vol_clean$VolBefore, summary_vol_clean$VolAfter, paired = TRUE)
 ```
-
-### Összefoglalás
-
-A 2019 és 2025 között vizsgált 84 NFP publikáció alapján nem figyelhető meg szignifikáns eseményhatás az amerikai részvénypiacon. Az eseményt követő 10 napos loghozamok átlaga nem tért el szignifikánsan a piaci referenciahozamtól. Ez alapján a NFP jelentések nem jártak együtt kiemelkedő árfolyamreakcióval.
